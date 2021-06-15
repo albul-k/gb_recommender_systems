@@ -1,5 +1,7 @@
+from typing import Iterable, Optional
 import pandas as pd
 import numpy as np
+import random
 
 # Для работы с матрицами
 from scipy.sparse import csr_matrix
@@ -19,7 +21,7 @@ class MainRecommender:
         Матрица взаимодействий user-item
     """
     
-    def __init__(self, data: pd.DataFrame, weighting_type: str) -> None:
+    def __init__(self, data: pd.DataFrame, weighting_type: Optional[str] = None) -> None:
         """Initialization
 
         Parameters
@@ -39,10 +41,10 @@ class MainRecommender:
         elif weighting_type == 'tfidf_weight':
             self.user_item_matrix = tfidf_weight(self.user_item_matrix.T).T 
         
-        self.model = self.fit(self.user_item_matrix)
-        self.own_recommender = self.fit_own_recommender(self.user_item_matrix)
+        self.model = self.fit()
+        self.own_recommender = self.fit_own_recommender()
      
-    def prepare_matrix(self, data):
+    def prepare_matrix(self, data: pd.DataFrame) -> pd.pivot_table:
         user_item_matrix = pd.pivot_table(
             data, 
             index='user_id',
@@ -54,7 +56,7 @@ class MainRecommender:
         user_item_matrix = user_item_matrix.astype(float) # необходимый тип матрицы для implicit
         return user_item_matrix
     
-    def prepare_dicts(self):
+    def prepare_dicts(self) -> Iterable[dict]:
         """Подготавливает вспомогательные словари"""
         
         userids = self.user_item_matrix.index.values
@@ -71,7 +73,7 @@ class MainRecommender:
         
         return id_to_itemid, id_to_userid, itemid_to_id, userid_to_id
      
-    def fit_own_recommender(self):
+    def fit_own_recommender(self) -> ItemItemRecommender():
         """Обучает модель, которая рекомендует товары, среди товаров, купленных юзером"""
     
         own_recommender = ItemItemRecommender(K=1, num_threads=4)
@@ -109,18 +111,55 @@ class MainRecommender:
         
         return model
 
-    def get_similar_items_recommendation(self, user, N: int = 5):
+    def get_similar_items_recommendation(self, user, N: int = 5) -> list:
         """Рекомендуем товары, похожие на топ-N купленных юзером товаров"""
 
-        # res = [ id_to_itemid[row_id] for row_id, score in self.model.similar_items(example_item_row_id, N=5)]
-        res = []
+        recs: list = [self.id_to_itemid[rec[0]] for rec in 
+            self.own_recommender.recommend(
+                userid=self.userid_to_id[user], 
+                user_items=csr_matrix(self.user_item_matrix).tocsr(),
+                N=N, 
+                filter_already_liked_items=False, 
+                filter_items=None, 
+                recalculate_user=True
+            )
+        ]
+        print(recs)
+        res: list = list()
+        for item_row_id in recs:
+            row_id, _ = self.model.similar_items(self.id_to_itemid[item_row_id], N=1)
+            res.append(self.id_to_itemid[row_id])
+        
         assert len(res) == N, 'Количество рекомендаций != {}'.format(N)
         return res
     
-    def get_similar_users_recommendation(self, user: int, N: int = 5):
+    def get_similar_users_recommendation(self, user: int, N: int = 5) -> list:
         """Рекомендуем топ-N товаров, среди купленных похожими юзерами"""
-    
-        # res = self.model.similar_users(self.userid_to_id[user], N=5)
-        res = []
+
+        # берем N похожих юзеров
+        users: list = [self.userid_to_id[rec[0]] for rec in 
+            self.model.similar_users(self.userid_to_id[user], N=N)
+        ]
+
+        # от каждого похожего юзера берем N товаров
+        res: list = list()
+        for user_ in users:
+            recs: list = [self.id_to_itemid[rec[0]] for rec in 
+                self.own_recommender.recommend(
+                    userid=self.userid_to_id[user_], 
+                    user_items=csr_matrix(self.user_item_matrix).tocsr(),
+                    N=N, 
+                    filter_already_liked_items=False, 
+                    filter_items=None, 
+                    recalculate_user=True
+                )
+            ]
+
+            for itm in recs:
+                res.append(itm)
+        
+        # слйчайно выбираем N товаров
+        res = random.choices(list(set(res)), k=N)
+
         assert len(res) == N, 'Количество рекомендаций != {}'.format(N)
         return res
