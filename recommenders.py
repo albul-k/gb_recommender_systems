@@ -1,7 +1,6 @@
 from typing import Iterable, Optional
 import pandas as pd
 import numpy as np
-import random
 
 # Для работы с матрицами
 from scipy.sparse import csr_matrix
@@ -114,9 +113,9 @@ class MainRecommender:
     def get_similar_items_recommendation(self, user, N: int = 5) -> list:
         """Рекомендуем товары, похожие на топ-N купленных юзером товаров"""
 
-        recs: list = [self.id_to_itemid[rec[0]] for rec in 
+        recs: list = [rec[0] for rec in 
             self.own_recommender.recommend(
-                userid=self.userid_to_id[user], 
+                userid=self.id_to_userid[user], 
                 user_items=csr_matrix(self.user_item_matrix).tocsr(),
                 N=N, 
                 filter_already_liked_items=False, 
@@ -124,10 +123,10 @@ class MainRecommender:
                 recalculate_user=True
             )
         ]
-        print(recs)
+        
         res: list = list()
         for item_row_id in recs:
-            row_id, _ = self.model.similar_items(self.id_to_itemid[item_row_id], N=1)
+            row_id, _ = self.model.similar_items(item_row_id, N=2)[1]
             res.append(self.id_to_itemid[row_id])
         
         assert len(res) == N, 'Количество рекомендаций != {}'.format(N)
@@ -137,16 +136,16 @@ class MainRecommender:
         """Рекомендуем топ-N товаров, среди купленных похожими юзерами"""
 
         # берем N похожих юзеров
-        users: list = [self.userid_to_id[rec[0]] for rec in 
-            self.model.similar_users(self.userid_to_id[user], N=N)
+        users: list = [rec[0] for rec in 
+            self.model.similar_users(self.id_to_userid[user], N=N)
         ]
-
+        
         # от каждого похожего юзера берем N товаров
         res: list = list()
         for user_ in users:
             recs: list = [self.id_to_itemid[rec[0]] for rec in 
                 self.own_recommender.recommend(
-                    userid=self.userid_to_id[user_], 
+                    userid=self.id_to_userid[user_], 
                     user_items=csr_matrix(self.user_item_matrix).tocsr(),
                     N=N, 
                     filter_already_liked_items=False, 
@@ -158,8 +157,7 @@ class MainRecommender:
             for itm in recs:
                 res.append(itm)
         
-        # слйчайно выбираем N товаров
-        res = random.choices(list(set(res)), k=N)
+        res = list(set(res))[0:N]
 
         assert len(res) == N, 'Количество рекомендаций != {}'.format(N)
         return res
