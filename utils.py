@@ -20,7 +20,7 @@ def prefilter_items(data, take_n_popular=5000, item_features=None):
     data['price'] = data['sales_value'] / (np.maximum(data['quantity'], 1))
     data = data[data['price'] > 2]
 
-    # Уберем слишком дорогие товарыs
+    # Уберем слишком дорогие товары
     data = data[data['price'] < 50]
 
     # Возбмем топ по популярности
@@ -31,7 +31,6 @@ def prefilter_items(data, take_n_popular=5000, item_features=None):
 
     # Заведем фиктивный item_id (если юзер покупал товары из топ-5000, то он "купил" такой товар)
     data.loc[~data['item_id'].isin(top), 'item_id'] = 999999
-
 
     return data
 

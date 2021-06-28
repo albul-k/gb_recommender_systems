@@ -6,7 +6,7 @@ from scipy.sparse import csr_matrix
 
 # Матричная факторизация
 from implicit.als import AlternatingLeastSquares
-from implicit.nearest_neighbours import ItemItemRecommender  # нужен для одного трюка
+from implicit.nearest_neighbours import ItemItemRecommender, CosineRecommender, TFIDFRecommender
 from implicit.nearest_neighbours import bm25_weight, tfidf_weight
 
 
@@ -18,7 +18,7 @@ class MainRecommender:
         Матрица взаимодействий user-item
     """
 
-    def __init__(self, data: pd.DataFrame, weighting: bool = True):
+    def __init__(self, data: pd.DataFrame, weighting_type: str = None, als_params: dict = None):
 
         # Топ покупок каждого юзера
         self.top_purchases = data.groupby(['user_id', 'item_id'])['quantity'].count().reset_index()
@@ -35,11 +35,22 @@ class MainRecommender:
         self.id_to_itemid, self.id_to_userid, \
         self.itemid_to_id, self.userid_to_id = self._prepare_dicts(self.user_item_matrix)
 
-        if weighting:
-            self.user_item_matrix = bm25_weight(self.user_item_matrix.T).T
-
-        self.model = self.fit(self.user_item_matrix)
+        if weighting_type == 'bm25':
+            self.user_item_matrix = bm25_weight(self.user_item_matrix.T).T 
+        elif weighting_type == 'tfidf':
+            self.user_item_matrix = tfidf_weight(self.user_item_matrix.T).T 
+        
+        if als_params is None:
+            als_params = {
+                'factors': 20,
+                'regularization': 0.001,
+                'iterations': 15,
+                'num_threads': 4,
+            }
+        self.model = self.fit(self.user_item_matrix, als_params)
         self.own_recommender = self.fit_own_recommender(self.user_item_matrix)
+        self.tfidf_recommender = self.fit_tfidf_recommender(self.user_item_matrix)
+        self.cosine_recommender = self.fit_cosine_recommender(self.user_item_matrix)
 
     @staticmethod
     def _prepare_matrix(data: pd.DataFrame):
@@ -84,13 +95,30 @@ class MainRecommender:
         return own_recommender
 
     @staticmethod
-    def fit(user_item_matrix, n_factors=20, regularization=0.001, iterations=15, num_threads=4):
+    def fit_tfidf_recommender(user_item_matrix, K:int = 5):
+        """TFIDFRecommender"""
+
+        tfidf_recommender = TFIDFRecommender(K=K, num_threads=4)
+        tfidf_recommender.fit(csr_matrix(user_item_matrix).T.tocsr())
+
+        return tfidf_recommender
+
+    @staticmethod
+    def fit_cosine_recommender(user_item_matrix, K:int = 5):
+        """CosineRecommender"""
+
+        cosine_recommender = CosineRecommender(K=K, num_threads=4)
+        cosine_recommender.fit(csr_matrix(user_item_matrix).T.tocsr())
+
+        return cosine_recommender
+
+    @staticmethod
+    def fit(user_item_matrix, als_params):
         """Обучает ALS"""
 
-        model = AlternatingLeastSquares(factors=n_factors,
-                                        regularization=regularization,
-                                        iterations=iterations,
-                                        num_threads=num_threads)
+        model = AlternatingLeastSquares(
+            **als_params
+        )
         model.fit(csr_matrix(user_item_matrix).T.tocsr())
 
         return model
@@ -142,6 +170,18 @@ class MainRecommender:
 
         self._update_dict(user_id=user)
         return self._get_recommendations(user, model=self.model, N=N)
+    
+    def get_tfidf_recommendations(self, user, N=5):
+        """Рекомендации через стардартные библиотеки implicit"""
+
+        self._update_dict(user_id=user)
+        return self._get_recommendations(user, model=self.tfidf_recommender, N=N)
+
+    def get_cosine_recommendations(self, user, N=5):
+        """Рекомендации через стардартные библиотеки implicit"""
+
+        self._update_dict(user_id=user)
+        return self._get_recommendations(user, model=self.cosine_recommender, N=N)
 
     def get_own_recommendations(self, user, N=5):
         """Рекомендуем товары среди тех, которые юзер уже купил"""
